@@ -1,1 +1,75 @@
+name: Build APK
 
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BookScanner-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+  release:
+    name: Đăng bản tải về (Releases)
+    needs: [apk]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Gom file
+        run: |
+          mkdir -p out
+          cp dist/BookScanner-debug-apk/*.apk out/BookScanner-debug.apk
+          ls -la out
+
+      # Push tag v*  -> bản phát hành chính thức
+      - name: Release (tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+
+      # Push main/master -> luôn cập nhật bản "latest" để tải APK mới nhất ở mục Releases
+      - name: Dời tag latest về commit mới
+        if: startsWith(github.ref, 'refs/heads/')
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git tag -f latest
+          git push -f origin latest
+      - name: Release latest
+        if: startsWith(github.ref, 'refs/heads/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Bản mới nhất (tự động build)
+          prerelease: true
+          files: out/*
